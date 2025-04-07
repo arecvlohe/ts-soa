@@ -1,0 +1,10 @@
+{
+  "devDependencies": {
+    "prettier": "3.5.3",
+    "typescript": "^5.8.2"
+  },
+  "dependencies": {
+    "@types/express": "^5.0.1",
+    "express": "^5.1.0"
+  }
+}
