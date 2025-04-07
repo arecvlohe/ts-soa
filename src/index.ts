@@ -7,6 +7,7 @@ interface DogAPIPicsResponse {
 
 interface DogAPIListResponse {
   message: Record<string, Array<string>>;
+  status: string;
 }
 
 interface DogPicsResponse {
@@ -29,41 +30,75 @@ abstract class DogsService {
 
 type Breed = `${string}/${string}`;
 
+class NetworkError extends Error {
+  constructor(
+    err: unknown,
+    readonly statusCode: number,
+  ) {
+    super(
+      err instanceof Error
+        ? err.message
+        : typeof err === "string"
+          ? err
+          : "Unknown network error",
+    );
+  }
+
+  name = "NetworkError";
+}
+
+class UnexpectedResponse extends Error {
+  constructor(
+    err: unknown,
+    readonly statusCode: number,
+  ) {
+    super(
+      err instanceof Error
+        ? err.message
+        : typeof err === "string"
+          ? err
+          : "Unexpected response",
+    );
+  }
+
+  name = "UnexpectedResponse";
+}
+
 class DogCEOImpl extends DogsService {
-  async getDogPics(breed: Breed): Promise<DogPicsResponse | Error> {
+  async getDogPics(breed: Breed): Promise<DogPicsResponse> {
     const res = await fetch(`https://dog.ceo/api/${breed}/images`)
       .then((res) => {
-        if (!res.ok) throw new Error("Bad response");
+        if (!res.ok) {
+          throw new UnexpectedResponse("Bad response", res.status);
+        }
         return res;
       })
       .then((res) => res.json() as unknown as DogAPIPicsResponse)
-      .catch((err) => new Error(`failed to fetch breed pics: ${err}`));
-
-    if (res instanceof Error) {
-      return res;
-    }
+      .catch((err) => {
+        throw new NetworkError(err, 500);
+      });
 
     return {
       data: res.message,
-    } as DogPicsResponse;
+    };
   }
 
-  async getDogsList(): Promise<DogsListResponse | Error> {
+  async getDogsList(): Promise<DogsListResponse> {
     const res = await fetch(`https://dog.ceo/api/breeds/list/all`)
       .then((res) => {
-        if (!res.ok) throw new Error("Bad response");
+        if (!res.ok) {
+          throw new UnexpectedResponse("Bad response", res.status);
+        }
         return res;
       })
-      .then((res) => res.json())
-      .catch((err) => new Error(`failed to fetch breeds list: ${err}`));
-
-    if (res instanceof Error) {
-      return res;
-    }
+      .then((res) => res.json() as unknown as DogAPIListResponse)
+      .catch((err) => {
+        throw new NetworkError(err, 500);
+      });
 
     return {
       data: res.message,
-    } as DogsListResponse;
+    };
   }
 }
 
@@ -84,26 +119,50 @@ const client = new DogsClient(new DogCEOImpl());
 const app = express();
 
 app.get("/list", async (_req, res) => {
-  const list = await client.getList();
-
-  if (list instanceof Error) {
-    res.status(400).send({
-      message: list.message,
-    });
-  } else {
+  try {
+    const list = await client.getList();
     res.status(200).send(list);
+  } catch (e: unknown) {
+    if (e instanceof NetworkError) {
+      res.status(500).send({
+        message: e.message,
+        status: "error",
+      });
+    } else if (e instanceof UnexpectedResponse) {
+      res.status(e.statusCode).send({
+        message: e.message,
+        status: "error",
+      });
+    } else {
+      res.status(400).send({
+        message: "Unknown error",
+        status: "error",
+      });
+    }
   }
 });
 
 app.get("/pics/:breed", async (req, res) => {
-  const pics = await client.getPics(req.params.breed);
-
-  if (pics instanceof Error) {
-    res.status(400).send({
-      message: pics.message,
-    });
-  } else {
+  try {
+    const pics = await client.getPics(req.params.breed);
     res.status(200).json(pics);
+  } catch (e) {
+    if (e instanceof NetworkError) {
+      res.status(e.statusCode).send({
+        message: e.message,
+        status: "error",
+      });
+    } else if (e instanceof UnexpectedResponse) {
+      res.status(e.statusCode).send({
+        message: e.message,
+        statsu: "error",
+      });
+    } else {
+      res.status(500).send({
+        message: "Unexpected error",
+        status: "error",
+      });
+    }
   }
 });
 
